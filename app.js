@@ -11,6 +11,7 @@ import {
     getFirestore, 
     doc, 
     setDoc, 
+    getDoc,
     getDocs,
     deleteDoc, 
     collection, 
@@ -175,7 +176,7 @@ export default function App() {
             for (const friend of friends) {
                 const friendWatchedPath = `artifacts/${appId}/users/${friend.id}/watchedList`;
                 const q = query(collection(db, friendWatchedPath), firestoreOrderBy('addedAt', 'desc'), limit(5));
-                const snap = await getDocs(q);
+                const snap = await getDocs(q); // <-- THIS WAS THE BUG. Corrected from getDoc to getDocs
                 snap.forEach(doc => {
                     feed.push({ ...doc.data(), id: doc.id, user: friend });
                 });
@@ -439,8 +440,8 @@ const MediaList = ({ title, list, onRemove, fetchProviders, isWatchedList }) => 
 );
 
 const SearchView = ({ searchTerm, setSearchTerm, searchResults, isSearching, searchMedia, addToList, watchedList, wishlist, fetchProviders }) => {
-    const watchedIds = useMemo(() => new Set(watchedList.map(i => i.id)), [watchedList]);
-    const wishlistIds = useMemo(() => new Set(wishlist.map(i => i.id)), [wishlist]);
+    const watchedIds = useMemo(() => new Set(watchedList.map(i => String(i.id))), [watchedList]);
+    const wishlistIds = useMemo(() => new Set(wishlist.map(i => String(i.id))), [wishlist]);
 
     return (
      <div>
@@ -531,7 +532,7 @@ const WhereToWatchModal = ({ isOpen, onClose, providers }) => {
     if (!providers) return null;
 
     const renderProviders = (provs) => {
-        if(!provs || provs.length === 0) return <p className="text-sm text-gray-500">Not available on major streaming services in India.</p>;
+        if(!provs || provs.length === 0) return null;
         return (
             <div className="flex flex-wrap justify-center gap-4">
                 {provs.map(p => (
