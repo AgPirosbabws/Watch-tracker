@@ -11,7 +11,7 @@ import {
     getFirestore, 
     doc, 
     setDoc, 
-    getDoc,
+    getDocs,
     deleteDoc, 
     collection, 
     onSnapshot,
@@ -24,10 +24,17 @@ import {
 } from 'firebase/firestore';
 
 // --- Configuration ---
-const firebaseConfigString = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
-const firebaseConfig = JSON.parse(firebaseConfigString);
+const firebaseConfig = {
+  apiKey: "AIzaSyBm-ULTmhbRNQxQhkj3PyQXLcwK4YlGHbY",
+  authDomain: "watch-tracker-d8e44.firebaseapp.com",
+  projectId: "watch-tracker-d8e44",
+  storageBucket: "watch-tracker-d8e44.appspot.com",
+  messagingSenderId: "778626168383",
+  appId: "1:778626168383:web:8cf8966bb74e0248caea8a",
+  measurementId: "G-1VEFZ43FTS"
+};
 
-const TMDB_API_KEY = 'adc0a3f998cfe6bb07bca24bd321074e'; // <--- IMPORTANT: REPLACE THIS!
+const TMDB_API_KEY = 'adc0a3f998cfe6bb07bca24bd321074e';
 const TMDB_API_URL = 'https://api.themoviedb.org/3';
 
 // --- Helper Components ---
@@ -93,24 +100,25 @@ export default function App() {
     const [watchProviders, setWatchProviders] = useState(null);
     const [isProviderModalOpen, setIsProviderModalOpen] = useState(false);
 
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    const appId = "watch-tracker-d8e44"; // Using your projectId as a stable appId
 
     // --- Effects ---
 
     // Initialize Firebase
     useEffect(() => {
-        if (firebaseConfig.apiKey) {
+        try {
             const app = initializeApp(firebaseConfig);
             setAuth(getAuth(app));
             setDb(getFirestore(app));
-        } else {
-             setError("Firebase configuration is missing.");
+        } catch(err) {
+            console.error("Firebase initialization error:", err);
+            setError("Could not connect to the services. Please check the configuration.");
         }
     }, []);
 
     // Auth State Observer
     useEffect(() => {
-        if (!auth) return;
+        if (!auth || !db) return;
         const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
             if (currentUser) {
                 setUser(currentUser);
@@ -118,7 +126,7 @@ export default function App() {
                 // Fetch user profile
                 const userDocRef = doc(db, `artifacts/${appId}/public/users`, currentUser.uid);
                 const userDoc = await getDoc(userDocRef);
-                if(userDoc.exists()) {
+                if(userDoc && userDoc.exists()) {
                     setDisplayName(userDoc.data().displayName);
                 }
                 setScreen('app');
@@ -157,23 +165,24 @@ export default function App() {
 
     // Friends Feed Loader
     useEffect(() => {
-        if (friends.length === 0) {
+        if (!db || friends.length === 0) {
             setFriendsFeed([]);
             return;
         }
         setIsFeedLoading(true);
         const fetchFeeds = async () => {
-            const feed = [];
+            let feed = [];
             for (const friend of friends) {
                 const friendWatchedPath = `artifacts/${appId}/users/${friend.id}/watchedList`;
                 const q = query(collection(db, friendWatchedPath), firestoreOrderBy('addedAt', 'desc'), limit(5));
-                const snap = await getDoc(q);
+                const snap = await getDocs(q);
                 snap.forEach(doc => {
                     feed.push({ ...doc.data(), id: doc.id, user: friend });
                 });
             }
+            // Sort all items from all friends together by date
             feed.sort((a, b) => (b.addedAt?.seconds || 0) - (a.addedAt?.seconds || 0));
-            setFriendsFeed(feed);
+            setFriendsFeed(feed.slice(0, 20)); // Limit total feed size
             setIsFeedLoading(false);
         };
         fetchFeeds();
@@ -198,7 +207,7 @@ export default function App() {
             // Check if display name is unique
             const usersRef = collection(db, `artifacts/${appId}/public/users`);
             const q = query(usersRef, where("displayName_lower", "==", displayName.toLowerCase()));
-            const nameCheck = await getDoc(q);
+            const nameCheck = await getDocs(q);
             if (!nameCheck.empty) {
                 throw new Error("Display name is already taken.");
             }
@@ -234,15 +243,14 @@ export default function App() {
 
     // --- Media Functions ---
     const searchMedia = useCallback(async () => {
-        if (!searchTerm.trim() || TMDB_API_KEY === 'YOUR_TMDB_API_KEY') {
-            if (TMDB_API_KEY === 'YOUR_TMDB_API_KEY') setError("Please add your TMDb API key.");
+        if (!searchTerm.trim()) {
             return;
         }
         setIsSearching(true);
         try {
             const res = await fetch(`${TMDB_API_URL}/search/multi?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(searchTerm)}`);
             const data = await res.json();
-            setSearchResults(data.results.filter(item => item.media_type === 'movie' || item.media_type === 'tv'));
+            setSearchResults(data.results.filter(item => (item.media_type === 'movie' || item.media_type === 'tv') && item.poster_path));
         } catch (err) {
             setError("Failed to search media.");
         } finally {
@@ -280,30 +288,31 @@ export default function App() {
 
     const fetchWatchProviders = async (item) => {
         setIsProviderModalOpen(true);
-        setWatchProviders({ loading: true });
+        setWatchProviders({ loading: true, item: item });
         try {
             const res = await fetch(`${TMDB_API_URL}/${item.media_type}/${item.id}/watch/providers?api_key=${TMDB_API_KEY}`);
             const data = await res.json();
             setWatchProviders({ data: data.results.IN, loading: false, item: item }); // Filter for India
         } catch (err) {
             setError("Could not fetch providers.");
-            setWatchProviders({ loading: false });
+            setWatchProviders({ loading: false, item: item });
         }
     };
 
     // --- Social Functions ---
     const searchUsers = async () => {
-        if(!userSearchTerm.trim()) return;
+        if(!userSearchTerm.trim() || !db) return;
         setIsUserSearching(true);
         const usersRef = collection(db, `artifacts/${appId}/public/users`);
         const q = query(usersRef, where('displayName_lower', '>=', userSearchTerm.toLowerCase()), where('displayName_lower', '<=', userSearchTerm.toLowerCase() + '\uf8ff'));
-        const snap = await getDoc(q);
+        const snap = await getDocs(q);
         const users = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(u => u.id !== userId);
         setUserSearchResults(users);
         setIsUserSearching(false);
     };
     
     const sendFriendRequest = async (targetUser) => {
+        if(!db) return;
         const requestPath = `artifacts/${appId}/users/${targetUser.id}/friendRequests`;
         await setDoc(doc(db, requestPath, userId), {
             displayName: displayName,
@@ -312,6 +321,7 @@ export default function App() {
     };
     
     const handleFriendRequest = async (request, action) => {
+        if (!db) return;
         if (action === 'accept') {
             const batch = writeBatch(db);
             // Add to own friends list
@@ -365,7 +375,7 @@ export default function App() {
             <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
                 {activeTab === 'watched' && <MediaList title="My Watched List" list={watchedList} onRemove={(id) => removeFromList(id, 'watched')} fetchProviders={fetchWatchProviders} isWatchedList={true}/>}
                 {activeTab === 'wishlist' && <MediaList title="My Wishlist" list={wishlist} onRemove={(id) => removeFromList(id, 'wishlist')} fetchProviders={fetchWatchProviders} isWatchedList={false}/>}
-                {activeTab === 'search' && <SearchView searchTerm={searchTerm} setSearchTerm={setSearchTerm} searchResults={searchResults} isSearching={isSearching} searchMedia={searchMedia} addToList={addToList} />}
+                {activeTab === 'search' && <SearchView searchTerm={searchTerm} setSearchTerm={setSearchTerm} searchResults={searchResults} isSearching={isSearching} searchMedia={searchMedia} addToList={addToList} watchedList={watchedList} wishlist={wishlist} fetchProviders={fetchWatchProviders} />}
                 {activeTab === 'friends' && <FriendsTab userSearchTerm={userSearchTerm} setUserSearchTerm={setUserSearchTerm} searchUsers={searchUsers} userSearchResults={userSearchResults} sendFriendRequest={sendFriendRequest} friends={friends} friendRequests={friendRequests} handleFriendRequest={handleFriendRequest} friendsFeed={friendsFeed} isFeedLoading={isFeedLoading} fetchProviders={fetchWatchProviders} />}
             </main>
         </div>
@@ -428,7 +438,11 @@ const MediaList = ({ title, list, onRemove, fetchProviders, isWatchedList }) => 
     </div>
 );
 
-const SearchView = ({ searchTerm, setSearchTerm, searchResults, isSearching, searchMedia, addToList }) => (
+const SearchView = ({ searchTerm, setSearchTerm, searchResults, isSearching, searchMedia, addToList, watchedList, wishlist, fetchProviders }) => {
+    const watchedIds = useMemo(() => new Set(watchedList.map(i => i.id)), [watchedList]);
+    const wishlistIds = useMemo(() => new Set(wishlist.map(i => i.id)), [wishlist]);
+
+    return (
      <div>
         <h2 className="text-2xl font-bold mb-4">Find Movies & Series</h2>
         <div className="flex gap-2 mb-8">
@@ -436,10 +450,21 @@ const SearchView = ({ searchTerm, setSearchTerm, searchResults, isSearching, sea
             <button onClick={searchMedia} disabled={isSearching} className="bg-sky-500 text-white px-4 rounded-lg font-semibold hover:bg-sky-600 flex items-center">{isSearching ? <Spinner size="h-6 w-6"/> : 'Search'}</button>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-            {searchResults.map(item => <MediaCard key={item.id} item={item} onAdd={addToList} onWishlist={addToList} onWatch={()=>{}}/>)}
+            {searchResults.map(item => (
+                <MediaCard 
+                    key={item.id} 
+                    item={item} 
+                    onAdd={addToList} 
+                    onWishlist={addToList} 
+                    onWatch={fetchProviders}
+                    isWatched={watchedIds.has(String(item.id))}
+                    isInWishlist={wishlistIds.has(String(item.id))}
+                />
+            ))}
         </div>
     </div>
-);
+    );
+};
 
 const FriendsTab = ({ userSearchTerm, setUserSearchTerm, searchUsers, userSearchResults, sendFriendRequest, friends, friendRequests, handleFriendRequest, friendsFeed, isFeedLoading, fetchProviders }) => {
     const [subTab, setSubTab] = useState('feed');
@@ -542,8 +567,8 @@ const WhereToWatchModal = ({ isOpen, onClose, providers }) => {
                                 <h4 className="font-semibold text-lg mt-4 mb-2">Buy</h4>
                                 {renderProviders(providers.data.buy)}
                             </div>
-                        )}
-                        {!providers.data?.flatrate && !providers.data?.rent && !providers.data?.buy && renderProviders([])}
+                         )}
+                         {(!providers.data?.flatrate && !providers.data?.rent && !providers.data?.buy) && <p className="text-sm text-gray-500">No streaming information available for India.</p>}
                      </div>
                 </div>
             )}
