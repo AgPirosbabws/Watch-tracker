@@ -27,7 +27,7 @@ import {
 const firebaseConfigString = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
 const firebaseConfig = JSON.parse(firebaseConfigString);
 
-const TMDB_API_KEY = 'YOUR_TMDB_API_KEY'; // <--- IMPORTANT: REPLACE THIS!
+const TMDB_API_KEY = 'adc0a3f998cfe6bb07bca24bd321074e'; // <--- IMPORTANT: REPLACE THIS!
 const TMDB_API_URL = 'https://api.themoviedb.org/3';
 
 // --- Helper Components ---
